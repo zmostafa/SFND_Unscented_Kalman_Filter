@@ -29,10 +29,10 @@ UKF::UKF() {
         0, 0, 0, 1, 0,
         0, 0, 0, 0, 1;
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 5.0;
+  std_a_ = 1.5;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 1.0;
+  std_yawdd_ = 0.45;
   
   /**
    * DO NOT MODIFY measurement noise values below.
@@ -64,7 +64,7 @@ UKF::UKF() {
    */
 
   // Augmented state dimension
-  n_aug_ = n_x_ * 2;
+  n_aug_ = 7;
 
   // Sigma point spreading parameter
   lambda_ = 3 - n_aug_;
@@ -84,13 +84,17 @@ UKF::UKF() {
   radarNoise_Q_ = MatrixXd(3, 3);
   radarNoise_Q_ << std_radr_ * std_radr_, 0, 0,
                   0, std_radphi_ * std_radphi_,0,
-                  0, 0, std_radr_ * std_radr_;
+                  0, 0, std_radrd_ * std_radrd_;
   
   // LiDAR Noise init
   lidarNoise_Q_ = MatrixXd(2, 2);
   lidarNoise_Q_ << std_laspx_ * std_laspx_ , 0,
                     0, std_laspy_ * std_laspy_;
   
+  // Noise matrix
+  Q_ = MatrixXd(2, 2);
+  Q_ << std_a_ * std_a_ , 0,
+        0, std_a_ * std_a_;
   // Radra NIS 
   radarNIS_ = 0.0;
 
@@ -117,12 +121,13 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       double vy = rho_dot * sin(phi);
       double v = sqrt(pow(vx, 2) + pow(vy, 2));
 
-      x_ << x, y, v, 0, 0;
-    }else{
+      x_ << x, y, 0, 0, 0;
+    }else{ // Sensor is LiDAR
       x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;
     }
 
     is_initialized_ = true;
+    time_us_ = meas_package.timestamp_;
     return;
   }
 
@@ -150,14 +155,12 @@ void UKF::Prediction(double delta_t) {
   MatrixXd P_aug = MatrixXd(n_aug_, n_aug_);
   MatrixXd Xsig_aug = MatrixXd(n_aug_, 2 * n_aug_ + 1);
 
-  x_aug.head(5) = x_;
-  x_aug(5) = 0;
-  x_aug(6) = 0;
+  x_aug.fill(0.0);
+  x_aug.head(n_x_) = x_;
 
   P_aug.fill(0.0);
-  P_aug.topLeftCorner(5, 5) = P_;
-  P_aug(5, 5) = std_a_ * std_a_;
-  P_aug(6, 6) = std_yawdd_ * std_yawdd_;
+  P_aug.topLeftCorner(n_x_, n_x_) = P_;
+  P_aug.bottomRightCorner(2, 2) = Q_;
 
   // Square root matrix using Cholesky Decomposition
   MatrixXd L = P_aug.llt().matrixL();
@@ -182,8 +185,8 @@ void UKF::Prediction(double delta_t) {
     // avoid division by zero
     if(fabs(yawd) > 0.001)
     {
-      px_p = px + v/yawd * (sin(yaw + yawd * delta_t) - sin(yaw));
-      py_p = py + v/yawd * (-cos(yaw + yawd*  delta_t) + cos(yaw));
+      px_p = px + v / yawd * (sin(yaw + yawd * delta_t) - sin(yaw));
+      py_p = py + v / yawd * (-cos(yaw + yawd*  delta_t) + cos(yaw));
     } 
     else
     {
@@ -201,7 +204,7 @@ void UKF::Prediction(double delta_t) {
     yaw_p = yaw_p + 0.5 * nuYawd * delta_t * delta_t;
     yawd_p = yawd_p + nuYawd * delta_t;
 
-    // write predicted sigma points
+    // predicted sigma points
     Xsig_pred_(0, i) = px_p;
     Xsig_pred_(1, i) = py_p;
     Xsig_pred_(2, i) = v_p;
@@ -220,10 +223,8 @@ void UKF::Prediction(double delta_t) {
 
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
 
-    while(x_diff(3) > M_PI) x_diff(3) -= 2. * M_PI;
-    while(x_diff(3) < -M_PI) x_diff(3) += 2. * M_PI;
-    
-    P_ = P_ + weights_(i)*x_diff*x_diff.transpose();
+    x_diff(3) = atan2(sin(x_diff(3)), cos(x_diff(3)));
+    P_ = P_ + weights_(i) * x_diff * x_diff.transpose();
   }
 }
 

@@ -102,6 +102,9 @@ class UKF {
   // LiDAR Noise Matrix
   Eigen::MatrixXd lidarNoise_Q_;
 
+  // Noise Matrix
+  Eigen::MatrixXd Q_;
+
   // Radar NIS
   double radarNIS_;
 
